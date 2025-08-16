@@ -1,25 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
-
-// Types for our problems
-export type Source = {
-  title: string;
-  url: string;
-}
-
-export type Problem = {
-  id: number;
-  statement: string;
-  sources: Source[];
-  has_solution: boolean;
-  solution_info: string;
-  has_negative_reviews: boolean;
-  created_at: string;
-}
+import { Problem } from '@/types';
+import { mockProblems } from '@/data/mock-data';
 
 // Function to create a Supabase client
 export const createSupabaseClient = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   
   if (!supabaseUrl || !supabaseAnonKey) {
     console.warn('Supabase credentials not found, using mock data');
@@ -36,25 +22,42 @@ export async function getProblems(): Promise<Problem[]> {
     
     // If Supabase client couldn't be created, use mock data
     if (!supabase) {
-      // Use dynamic import for mock data
-      const mockProblems = await import('../data/mock-problems.json');
-      return mockProblems.default as Problem[];
+      return mockProblems;
     }
     
     // Otherwise, fetch from Supabase
     const { data, error } = await supabase
       .from('problems')
-      .select('*')
-      .order('id', { ascending: true });
+      .select(`
+        id, 
+        statement, 
+        solution, 
+        has_negative_reviews, 
+        review_url, 
+        created_at, 
+        updated_at,
+        sources (
+          id, 
+          title, 
+          url, 
+          snippet
+        )
+      `)
+      .order('updated_at', { ascending: false });
     
     if (error) {
-      console.error('Error fetching problems:', error);
-      return [];
+      console.error('Error fetching from Supabase:', error);
+      return mockProblems;
     }
     
-    return data as Problem[] || [];
-  } catch (err) {
-    console.error('Failed to fetch problems:', err);
-    return [];
+    if (!data || data.length === 0) {
+      console.warn('No data found in Supabase, using mock data');
+      return mockProblems;
+    }
+    
+    return data as Problem[];
+  } catch (error) {
+    console.error('Error in getProblems:', error);
+    return mockProblems;
   }
 }

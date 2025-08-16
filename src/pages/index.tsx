@@ -1,14 +1,27 @@
 import { useEffect, useState } from 'react';
 import { Problem } from '@/types';
-import { mockProblems } from '../data/mock-data';
 import Head from 'next/head';
 import ProblemList from '@/components/ProblemList';
+import { getProblems } from '@/utils/supabase';
 
 export default function Home() {
   const [problems, setProblems] = useState<Problem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    setProblems(mockProblems);
+    async function loadProblems() {
+      try {
+        setLoading(true);
+        const problemsData = await getProblems();
+        setProblems(problemsData);
+      } catch (error) {
+        console.error('Error loading problems:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadProblems();
   }, []);
   
   return (
@@ -43,9 +56,15 @@ export default function Home() {
               </p>
             </div>
             
-            <div className="bg-white shadow overflow-hidden sm:rounded-md">
-              <ProblemList problems={problems} />
-            </div>
+            {loading ? (
+              <div className="flex justify-center items-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+              </div>
+            ) : (
+              <div className="bg-white shadow overflow-hidden sm:rounded-md">
+                <ProblemList problems={problems} />
+              </div>
+            )}
           </div>
         </div>
       </main>
