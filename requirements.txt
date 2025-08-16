@@ -1,0 +1,6 @@
+supabase
+python-dotenv
+tqdm
+ddgs
+transformers
+sentence-transformers
