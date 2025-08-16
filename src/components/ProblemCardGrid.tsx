@@ -1,15 +1,14 @@
 'use client';
 
 import { Problem } from '@/types';
-import { useState } from 'react';
 import Link from 'next/link';
 import { FaCheck, FaExclamationTriangle, FaEye, FaLink } from 'react-icons/fa';
 
-interface ProblemCardProps {
+interface ProblemCardGridProps {
   problem: Problem;
 }
 
-export default function ProblemCard({ problem }: ProblemCardProps) {
+export default function ProblemCardGrid({ problem }: ProblemCardGridProps) {
   // Format the updated time
   const updatedDate = new Date(problem.updated_at);
   const formattedDate = updatedDate.toLocaleDateString('en-US', {
