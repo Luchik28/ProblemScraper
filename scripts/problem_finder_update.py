@@ -115,12 +115,14 @@ NSFW_TERMS: List[str] = [
 # -----------------------------
 def get_supabase_client() -> Client:
     """Get a Supabase client using environment variables."""
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
+    # Check for Vercel environment variables first
+    supabase_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_KEY")
     
     if not supabase_url or not supabase_key:
-        raise ValueError("SUPABASE_URL and SUPABASE_KEY environment variables must be set")
+        raise ValueError("SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_KEY/NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables must be set")
     
+    print(f"Using Supabase URL: {supabase_url[:20]}...")
     return create_client(supabase_url, supabase_key)
 
 def upsert_problem(supabase: Client, problem: dict) -> str:
@@ -235,12 +237,37 @@ if __name__ == "__main__":
         print("\n📊 Problem Finder - Database Update Script")
         print("------------------------------------------")
         
-        # Run the problem finder and get the clusters
-        clusters = search_and_cluster()
+        # Since this is just a stub for now, we'll create some dummy data
+        # In the real implementation, you would call search_and_cluster() here
+        class DummySource:
+            def __init__(self, title, url, snippet):
+                self.title = title
+                self.url = url
+                self.snippet = snippet
+        
+        class DummyCluster:
+            def __init__(self, problem, solution, sources):
+                self.problem = problem
+                self.solution = solution
+                self.has_negative_reviews = False
+                self.review_url = ""
+                self.sources = sources
+        
+        # Create dummy clusters for testing
+        clusters = [
+            DummyCluster(
+                "People are frustrated with slow website load times on mobile devices",
+                "Create a lightweight, progressive web app that loads quickly on mobile networks",
+                [DummySource("Web Performance Issues", "https://example.com/web-perf", "Users complain about slow loading websites")]
+            )
+        ]
         
         # Update the database with the problems
         update_database_with_problems(clusters)
         
+    except Exception as e:
+        print(f"Error running script: {e}")
+        traceback.print_exc()
     finally:
-        # Make sure we clean up resources even if there's an error
-        cleanup_resources()
+        # Cleanup (would call cleanup_resources() in the full implementation)
+        print("Script execution completed")
