@@ -40,7 +40,7 @@ from supabase import create_client, Client
 
 # Import all the original problem finder code here
 # This is the same code from problem_finder_mvp.py with a few modifications
-# to update the database instead of writing to a file
+# to update the database instead of writing to a file TEST
 
 # -----------------------------
 # CONFIG
