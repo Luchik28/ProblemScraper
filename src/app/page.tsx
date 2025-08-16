@@ -1,11 +1,17 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import Layout from '@/components/Layout';
 import ProblemList from '@/components/ProblemList';
-import { getProblems } from '@/lib/data';
+import { Problem } from '@/types';
+import { mockProblems } from '../data/mock-data';
 
-export const revalidate = 3600; // Revalidate this page every hour
+export default function Home() {
+  const [problems, setProblems] = useState<Problem[]>([]);
 
-export default async function Home() {
-  const problems = await getProblems();
+  useEffect(() => {
+    setProblems(mockProblems);
+  }, []);
   
   return (
     <Layout>

@@ -1,3 +1,5 @@
+'use client';
+
 import { Problem } from '@/types';
 import ProblemCard from './ProblemCard';
 

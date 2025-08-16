@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --no-lint",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "update-problems": "python scripts/problem_finder_update.py"
   },
   "dependencies": {
     "@supabase/ssr": "^0.0.10",

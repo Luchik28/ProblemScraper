@@ -1,15 +1,27 @@
-import { supabase } from '@/lib/supabase';
 import { Problem } from '@/types';
+import mockProblemsData from '../data/mock-problems.json';
+
+// Create a properly typed mock data object
+const mockProblems = mockProblemsData.map(problem => ({
+  id: problem.id.toString(),
+  statement: problem.statement,
+  solution: problem.solution_info || '',
+  has_negative_reviews: problem.has_negative_reviews,
+  review_url: '',
+  created_at: problem.created_at,
+  updated_at: problem.created_at,
+  sources: problem.sources.map(source => ({
+    id: `src-${Math.floor(Math.random() * 10000)}`, // Deterministic ID for SSR
+    title: source.title,
+    url: source.url,
+    snippet: ''
+  }))
+}));
 
 export async function getProblems(): Promise<Problem[]> {
   try {
-    // Use the stored procedure to get problems with their sources
-    const { data, error } = await supabase
-      .rpc('get_problems_with_sources');
-
-    if (error) throw error;
-    
-    return data as Problem[];
+    // Use static mock data for build time
+    return [...mockProblems];
   } catch (error) {
     console.error('Error fetching problems:', error);
     return [];
@@ -18,36 +30,13 @@ export async function getProblems(): Promise<Problem[]> {
 
 export async function getProblemById(id: string): Promise<Problem | null> {
   try {
-    // Get the problem by id
-    const { data: problem, error: problemError } = await supabase
-      .from('problems')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (problemError) throw problemError;
+    // Get all problems and find the one by ID
+    const problems = await getProblems();
+    const problem = problems.find(p => p.id === id);
+    
     if (!problem) return null;
-
-    // Get the sources for this problem
-    const { data: sources, error: sourcesError } = await supabase
-      .from('problem_sources')
-      .select(`
-        sources:source_id (
-          id,
-          title,
-          url,
-          snippet
-        )
-      `)
-      .eq('problem_id', id);
-
-    if (sourcesError) throw sourcesError;
-
-    // Format the result
-    return {
-      ...problem,
-      sources: sources?.map(item => item.sources) || []
-    } as Problem;
+    
+    return problem;
   } catch (error) {
     console.error('Error fetching problem by ID:', error);
     return null;

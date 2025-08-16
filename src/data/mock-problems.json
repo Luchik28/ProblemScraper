@@ -1,0 +1,66 @@
+[
+  {
+    "id": 1,
+    "statement": "Need a dating app with better matching algorithms and compatibility indicators.",
+    "sources": [
+      {
+        "title": "Frustrated with dating r/childfree",
+        "url": "https://www.reddit.com/r/childfree/comments/190hij8/frustrated_with_dating/"
+      }
+    ],
+    "has_solution": false,
+    "solution_info": "",
+    "has_negative_reviews": false,
+    "created_at": "2023-08-16 10:30:00"
+  },
+  {
+    "id": 2,
+    "statement": "Need a medical rotation scheduling system that optimizes assignments based on preferences and educational value.",
+    "sources": [
+      {
+        "title": "Frustrated with everyone getting married during 3rd year...",
+        "url": "https://www.reddit.com/r/medicalschool/comments/1ayxehx/frustrated_with_everyone_getting_married_during/"
+      },
+      {
+        "title": "Software to manage hospital rotations and shift-work for",
+        "url": "https://www.reddit.com/r/medicine/comments/idfbvi/software_to_manage_hospital_rotations_and/"
+      },
+      {
+        "title": "[vent] Wanted to do IM, but rotation made me very insecure",
+        "url": "https://www.reddit.com/r/medicalschool/comments/ki7tc4/vent_wanted_to_do_im_but_rotation_made_me_very/"
+      }
+    ],
+    "has_solution": false,
+    "solution_info": "",
+    "has_negative_reviews": false,
+    "created_at": "2023-08-16 10:30:00"
+  },
+  {
+    "id": 3,
+    "statement": "Need a relationship management tool to improve communication and resolve conflicts.",
+    "sources": [
+      {
+        "title": "Frustrated with my friend r/notliketheothergirls",
+        "url": "https://www.reddit.com/r/notliketheothergirls/comments/1fzxdt8/frustrated_with_my_friend/"
+      }
+    ],
+    "has_solution": false,
+    "solution_info": "",
+    "has_negative_reviews": false,
+    "created_at": "2023-08-16 10:30:00"
+  },
+  {
+    "id": 4,
+    "statement": "Need a social media management tool that prevents posting/voting errors and improves content moderation.",
+    "sources": [
+      {
+        "title": "How often do you get frustrated with your partner and how ...",
+        "url": "https://www.reddit.com/r/AskWomenOver30/comments/1es4p3w/how_often_do_you_get_frustrated_with_your_partner/"
+      }
+    ],
+    "has_solution": true,
+    "solution_info": "Potential solutions listed at: https://www.g2.com/categories/social-media-mgmt",
+    "has_negative_reviews": false,
+    "created_at": "2023-08-16 10:30:00"
+  }
+]

@@ -1,10 +1,7 @@
+'use client';
+
 import Layout from '@/components/Layout';
 import Link from 'next/link';
-
-export const metadata = {
-  title: 'About Problem Finder',
-  description: 'Learn more about Problem Finder and how it works',
-};
 
 export default function AboutPage() {
   return (
