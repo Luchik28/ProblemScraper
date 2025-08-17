@@ -9,6 +9,7 @@ export interface Problem {
   id: string;
   statement: string;
   solution: string;
+  solution_url?: string;
   has_negative_reviews: boolean;
   review_url: string;
   created_at: string;

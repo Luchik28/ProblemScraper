@@ -135,6 +135,19 @@ export default function ProblemDetail() {
                     <p className="text-green-800">
                       {problem.solution}
                     </p>
+                    {problem.solution_url && problem.solution_url.startsWith('http') && (
+                      <div className="mt-3">
+                        <a 
+                          href={problem.solution_url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center text-green-700 hover:text-green-900"
+                        >
+                          <FaLink className="mr-2 h-4 w-4" />
+                          View Solution
+                        </a>
+                      </div>
+                    )}
                     {problem.has_negative_reviews && problem.review_url && (
                       <div className="mt-3 flex items-center text-amber-600">
                         <FaExclamationTriangle className="h-4 w-4 mr-2" />
@@ -169,10 +182,10 @@ export default function ProblemDetail() {
                         >
                           <FaLink className="h-5 w-5 text-gray-400 mr-3 mt-0.5" />
                           <div>
-                            <p className="font-medium text-gray-700">{source.title || source.url}</p>
-                            {source.snippet && (
-                              <p className="mt-1 text-sm text-gray-600">{source.snippet}</p>
-                            )}
+                            <p className="font-medium text-gray-700">{source.title}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {source.url}
+                            </p>
                           </div>
                         </a>
                       </li>

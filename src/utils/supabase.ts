@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import { Problem } from '@/types';
-import { mockProblems } from '@/data/mock-data';
 
 // Function to create a Supabase client
 export const createSupabaseClient = () => {
@@ -8,7 +7,7 @@ export const createSupabaseClient = () => {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   
   if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn('Supabase credentials not found, using mock data');
+    console.warn('Supabase credentials not found');
     return null;
   }
   
@@ -20,9 +19,10 @@ export async function getProblems(): Promise<Problem[]> {
   try {
     const supabase = createSupabaseClient();
     
-    // If Supabase client couldn't be created, use mock data
+    // If Supabase client couldn't be created, return empty array
     if (!supabase) {
-      return mockProblems;
+      console.error('Could not connect to Supabase. Problems unavailable.');
+      return [];
     }
     
     // First, fetch the problems
@@ -33,7 +33,7 @@ export async function getProblems(): Promise<Problem[]> {
     
     if (problemsError || !problemsData || problemsData.length === 0) {
       console.error('Error fetching problems from Supabase or no problems found:', problemsError);
-      return mockProblems;
+      return []; // Return empty array instead of mock data
     }
     
     // Then, for each problem, fetch its sources using the junction table
@@ -70,6 +70,6 @@ export async function getProblems(): Promise<Problem[]> {
     return problems as Problem[];
   } catch (error) {
     console.error('Error in getProblems:', error);
-    return mockProblems;
+    return []; // Return empty array instead of mock data
   }
 }
