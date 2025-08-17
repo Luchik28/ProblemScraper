@@ -51,6 +51,15 @@ export default function Home() {
 
   // Sort problems based on current sort option and direction
   const sortedProblems = [...problems].sort((a, b) => {
+    // First, sort unsolved problems to the top
+    if (!a.solution && b.solution) {
+      return -1; // a comes first (unsolved)
+    }
+    if (a.solution && !b.solution) {
+      return 1; // b comes first (unsolved)
+    }
+    
+    // Then apply the selected sort option
     if (sortOption === 'sources') {
       const diff = a.sources.length - b.sources.length;
       return sortDirection === 'asc' ? diff : -diff;

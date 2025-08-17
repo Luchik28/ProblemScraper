@@ -101,20 +101,20 @@ export default function ProblemDetail() {
                 </p>
                 
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {/* Has solution tag */}
+                  {/* Solution tag - switched: no solution is green (opportunity), has solution is gray */}
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    problem.solution ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                    !problem.solution ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                   }`}>
-                    {problem.solution ? (
+                    {!problem.solution ? (
                       <>
                         <FaCheck className="mr-1 h-3 w-3" />
-                        Has Solution
+                        No Solution Yet
                       </>
-                    ) : 'No Solution Yet'}
+                    ) : 'Has Solution'}
                   </span>
                   
-                  {/* Complaint count tag */}
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  {/* Complaint count tag - We don't need dynamic color here since it's just one problem */}
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-200 text-blue-800">
                     {problem.sources.length} {problem.sources.length === 1 ? 'Complaint' : 'Complaints'}
                   </span>
                   
