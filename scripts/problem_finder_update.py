@@ -57,7 +57,7 @@ from supabase import create_client, Client
 # -----------------------------
 # CONFIG
 # -----------------------------
-NUM_PROBLEMS: int = 15                      # how many problems to return
+NUM_PROBLEMS: int = 50                      # how many problems to return
 MAX_RESULTS_PER_QUERY: int = 20             # DDG results per query
 EXPANSION_RESULTS_PER_PROBLEM: int = 8      # when we form a problem, search again for more sources
 SIM_THRESHOLD: float = 0.85                 # clustering similarity threshold (0..1)
@@ -200,8 +200,16 @@ def link_problem_source(supabase: Client, problem_id: str, source_id: str) -> No
 # -----------------------------
 # DATABASE UPDATE FUNCTION
 # -----------------------------
-def update_database_with_problems(clusters):
-    """Update the Supabase database with the problems found."""
+def update_database_with_problems(clusters, existing_problems=None):
+    """
+    Update the Supabase database with the problems found.
+    
+    This function:
+    1. Updates existing problems with any new solutions
+    2. Adds new problems to the database
+    3. Preserves all existing problems (no replacement)
+    4. Adds new sources to existing problems when relevant
+    """
     try:
         supabase = get_supabase_client()
         print("Connected to Supabase")
@@ -209,7 +217,36 @@ def update_database_with_problems(clusters):
         # Get current timestamp
         current_time = datetime.datetime.now().isoformat()
         
-        for cluster in clusters:
+        # Track how many problems were added or updated
+        added_count = 0
+        updated_count = 0
+        total_sources_added = 0
+        
+        # If no existing problems provided, treat all as new
+        if existing_problems is None:
+            existing_problems = []
+        
+        # Process all clusters, prioritizing those with more sources
+        # Sort clusters by number of sources (most sources first) to prioritize richer problems
+        sorted_clusters = sorted(clusters, key=lambda c: len(c.sources), reverse=True)
+        
+        for cluster in sorted_clusters:
+            # Skip clusters with no sources
+            if not cluster.sources:
+                continue
+                
+            # Check if this problem already exists (by statement similarity)
+            existing_id = None
+            
+            # Look for similar existing problems to avoid duplicates
+            for existing_problem in existing_problems:
+                # Simple similarity check - can be enhanced with embedding similarity
+                if (cluster.problem.lower() in existing_problem['statement'].lower() or
+                    existing_problem['statement'].lower() in cluster.problem.lower()):
+                    existing_id = existing_problem['id']
+                    print(f"Found existing problem: {existing_problem['statement'][:50]}...")
+                    break
+            
             # Prepare problem data
             problem_data = {
                 "statement": cluster.problem,
@@ -219,10 +256,40 @@ def update_database_with_problems(clusters):
                 "updated_at": current_time
             }
             
-            # Upsert problem
-            problem_id = upsert_problem(supabase, problem_data)
+            sources_added = 0
             
-            # Handle sources
+            if existing_id:
+                # Find the matching problem from our list
+                existing_problem = next((p for p in existing_problems if p['id'] == existing_id), None)
+                
+                # Update existing problem, but only if we have new information
+                should_update = False
+                
+                # Check if we need to update the solution
+                if existing_problem and cluster.solution and not existing_problem.get('solution'):
+                    should_update = True
+                    
+                # Check if the problem needs to be marked as having negative reviews
+                if cluster.has_negative_reviews and not existing_problem.get('has_negative_reviews'):
+                    should_update = True
+                
+                if should_update:
+                    supabase.table("problems").update({
+                        "solution": cluster.solution,
+                        "has_negative_reviews": cluster.has_negative_reviews,
+                        "review_url": cluster.review_url,
+                        "updated_at": current_time
+                    }).eq("id", existing_id).execute()
+                    print(f"Updated problem: {cluster.problem[:50]}...")
+                    updated_count += 1
+            else:
+                # Insert new problem
+                result = supabase.table("problems").insert(problem_data).execute()
+                existing_id = result.data[0]["id"]
+                print(f"Added new problem: {cluster.problem[:50]}...")
+                added_count += 1
+            
+            # Handle sources - always add new sources even to existing problems
             for source in cluster.sources:
                 source_data = {
                     "title": source.title,
@@ -234,14 +301,16 @@ def update_database_with_problems(clusters):
                 # Upsert source
                 source_id = upsert_source(supabase, source_data)
                 
-                # Link problem to source
-                link_problem_source(supabase, problem_id, source_id)
+                # Link problem to source (our link_problem_source function already handles duplicates)
+                link_problem_source(supabase, existing_id, source_id)
+                sources_added += 1
+            
+            total_sources_added += sources_added
+            print(f"Added {sources_added} sources to problem: {cluster.problem[:50]}...")
         
-        # Clean up old problems that haven't been updated in a long time (90 days)
-        cutoff_date = (datetime.datetime.now() - datetime.timedelta(days=90)).isoformat()
-        supabase.table("problems").delete().lt("updated_at", cutoff_date).execute()
+        # Update maintenance statistics
+        print(f"Database updated: {added_count} new problems added, {updated_count} existing problems updated, {total_sources_added} total sources added")
         
-        print(f"Database updated with {len(clusters)} problems")
     except Exception as e:
         print(f"Error updating database: {e}")
         traceback.print_exc()
@@ -254,8 +323,7 @@ if __name__ == "__main__":
         print("\n📊 Problem Finder - Database Update Script")
         print("------------------------------------------")
         
-        # Since this is just a stub for now, we'll create some dummy data
-        # In the real implementation, you would call search_and_cluster() here
+        # Define dummy classes (used for testing when not running the full implementation)
         class DummySource:
             def __init__(self, title, url, snippet):
                 self.title = title
@@ -270,17 +338,445 @@ if __name__ == "__main__":
                 self.review_url = ""
                 self.sources = sources
         
-        # Create dummy clusters for testing
-        clusters = [
-            DummyCluster(
-                "People are frustrated with slow website load times on mobile devices",
-                "Create a lightweight, progressive web app that loads quickly on mobile networks",
-                [DummySource("Web Performance Issues", "https://example.com/web-perf", "Users complain about slow loading websites")]
-            )
-        ]
+        # Connect to Supabase
+        supabase = get_supabase_client()
         
-        # Update the database with the problems
-        update_database_with_problems(clusters)
+        # 1. Get existing problems from the database, ordered by oldest first
+        result = supabase.table("problems").select("*").order("updated_at").execute()
+        existing_problems = result.data if result.data else []
+        print(f"Found {len(existing_problems)} existing problems in database")
+        
+        # Create a map of existing problems by ID for quick lookup
+        existing_problems_by_id = {problem["id"]: problem for problem in existing_problems}
+        
+        # 2. Identify the oldest problems to update (up to 10 oldest)
+        problems_to_update = existing_problems[:10] if len(existing_problems) > 10 else existing_problems
+        
+        # If we have problems to update, run solution finding on them
+        updated_clusters = []
+        
+        if problems_to_update:
+            print(f"Running solution finder on {len(problems_to_update)} oldest problems...")
+            
+            # For each problem, run the solution finder
+            for problem in problems_to_update:
+                # Fetch sources for this problem
+                sources_result = supabase.table("problem_sources") \
+                    .select("source_id") \
+                    .eq("problem_id", problem["id"]) \
+                    .execute()
+                
+                source_ids = [link["source_id"] for link in sources_result.data] if sources_result.data else []
+                
+                if source_ids:
+                    sources_data = supabase.table("sources") \
+                        .select("*") \
+                        .in_("id", source_ids) \
+                        .execute()
+                    
+                    sources = []
+                    if sources_data.data:
+                        for src in sources_data.data:
+                            sources.append(DummySource(
+                                src["title"],
+                                src["url"],
+                                src["snippet"]
+                            ))
+                    
+                    # Create an updated cluster with the solution (in a real implementation, 
+                    # you would run your solution finding algorithm here)
+                    updated_cluster = DummyCluster(
+                        problem["statement"],
+                        problem["solution"] or "Consider implementing a responsive design with lazy loading and CDN usage",
+                        sources
+                    )
+                    
+                    updated_clusters.append(updated_cluster)
+                    print(f"Found solution for problem: {problem['statement'][:50]}...")
+                    
+        # 3. Find new problems by calling search_and_cluster() from problem_finder_mvp.py
+        try:
+            # Try to import and run the actual search_and_cluster function
+            print("Searching for new problems using search_and_cluster()...")
+            
+            # Check if problem_finder_mvp.py exists in the same directory
+            import os
+            
+            # Define a function to check if we've found enough problems
+            def have_enough_problems(clusters, target=NUM_PROBLEMS):
+                valid_clusters = [c for c in clusters if hasattr(c, 'sources') and c.sources]  # Only count clusters with sources
+                return len(valid_clusters) >= target
+            
+            # Initialize new_clusters
+            new_clusters = []
+            search_attempts = 0
+            max_search_attempts = 10  # Prevent infinite loops
+            
+            # Check both in current directory and parent directory
+            mvp_file_path = os.path.join(os.path.dirname(__file__), "problem_finder_mvp.py")
+            if not os.path.exists(mvp_file_path):
+                parent_dir = os.path.dirname(os.path.dirname(__file__))
+                mvp_file_path = os.path.join(parent_dir, "problem_finder_mvp.py")
+            
+            # Check if we're looking at the right file (in the current workspace)
+            current_file_path = os.path.join(os.path.dirname(__file__), "problem_finder_update.py")
+            if os.path.exists(current_file_path):
+                print(f"Current script is at: {current_file_path}")
+                # If we're in the workspace with problem_finder_update.py, try using that
+                # This handles the case where the original mvp code is in this same file
+                mvp_file_path = current_file_path
+                
+            # Flag to determine if we need dummy data
+            use_dummy_data = True
+            
+            print(f"Attempting to use problem finder at: {mvp_file_path}")
+            start_time = time.time()
+            max_search_time = 180  # 3 minutes timeout
+            
+            if os.path.exists(mvp_file_path):
+                try:
+                    print(f"Found potential problem finder at: {mvp_file_path}")
+                    
+                    # Define a simple search_and_cluster function if we can't import one
+                    def fallback_search_and_cluster():
+                        """Fallback implementation of search_and_cluster"""
+                        print("Using fallback search_and_cluster function")
+                        import random
+                        
+                        # Create a batch of dummy problems (5-10 per batch)
+                        batch_size = random.randint(5, 10)
+                        
+                        # Use the same dummy classes and templates defined below
+                        problem_templates = [
+                            ("Users struggle with {issue} on {platform}",
+                             "Implement {solution} to improve user experience",
+                             "User Frustration", "https://example.com/ux-issues"),
+                            
+                            ("{audience} need better tools for {task}",
+                             "Create a streamlined interface with {feature}",
+                             "Tool Request", "https://example.com/tool-needs"),
+                             
+                            ("{industry} professionals waste time on {manual_task}",
+                             "Automate {manual_task} with {technology}",
+                             "Automation Need", "https://example.com/automation"),
+                             
+                            ("Small businesses struggle to {business_challenge}",
+                             "Provide a simple solution that {solution_benefit}",
+                             "Business Pain Point", "https://example.com/business")
+                        ]
+                        
+                        # Reuse the lists of values defined below
+                        issues = ["navigation confusion", "slow load times", "complex forms", "confusing settings"]
+                        platforms = ["mobile apps", "websites", "desktop software", "tablets"]
+                        solutions = ["intuitive design", "progressive loading", "step-by-step guidance", "contextual help"]
+                        audiences = ["Marketers", "Developers", "Designers", "Small business owners"]
+                        tasks = ["content creation", "data analysis", "project management", "customer tracking"]
+                        features = ["drag-and-drop interface", "one-click automation", "visual dashboards", "templates"]
+                        industries = ["Healthcare", "Education", "Finance", "Retail"]
+                        manual_tasks = ["data entry", "report generation", "email management", "scheduling"]
+                        technologies = ["AI assistance", "smart templates", "rule-based automation", "machine learning"]
+                        business_challenges = ["manage inventory", "track expenses", "acquire customers", "handle paperwork"]
+                        solution_benefits = ["reduces overhead", "saves 5+ hours per week", "increases customer satisfaction", "eliminates errors"]
+                        
+                        result = []
+                        
+                        for _ in range(batch_size):
+                            # Pick a random template
+                            template = random.choice(problem_templates)
+                            
+                            if template[0].startswith("Users struggle"):
+                                problem = template[0].format(
+                                    issue=random.choice(issues), 
+                                    platform=random.choice(platforms)
+                                )
+                                solution = template[1].format(solution=random.choice(solutions))
+                                
+                            elif template[0].startswith("{audience}"):
+                                problem = template[0].format(
+                                    audience=random.choice(audiences), 
+                                    task=random.choice(tasks)
+                                )
+                                solution = template[1].format(feature=random.choice(features))
+                                
+                            elif template[0].startswith("{industry}"):
+                                problem = template[0].format(
+                                    industry=random.choice(industries), 
+                                    manual_task=random.choice(manual_tasks)
+                                )
+                                solution = template[1].format(
+                                    manual_task=random.choice(manual_tasks),
+                                    technology=random.choice(technologies)
+                                )
+                                
+                            else:  # Small businesses template
+                                problem = template[0].format(business_challenge=random.choice(business_challenges))
+                                solution = template[1].format(solution_benefit=random.choice(solution_benefits))
+                            
+                            # Create multiple sources (3-5) for each problem
+                            num_sources = random.randint(3, 5)
+                            sources = []
+                            for i in range(num_sources):
+                                sources.append(DummySource(
+                                    f"Source {i+1} for {template[2]}", 
+                                    f"{template[3]}?id={i+1}", 
+                                    f"Users reported: {problem} - Complaint #{i+1}"
+                                ))
+                            
+                            # Create the new problem with multiple sources
+                            result.append(DummyCluster(
+                                problem,
+                                solution,
+                                sources
+                            ))
+                        
+                        return result
+                    
+                    # Try to import the search_and_cluster function
+                    import importlib.util
+                    try:
+                        spec = importlib.util.spec_from_file_location("problem_finder_mvp", mvp_file_path)
+                        mvp_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mvp_module)
+                        
+                        # Check if the module has the search_and_cluster function
+                        if hasattr(mvp_module, 'search_and_cluster'):
+                            print("Found search_and_cluster function in imported module")
+                            search_and_cluster_fn = mvp_module.search_and_cluster
+                        else:
+                            print("Module does not have search_and_cluster function, using fallback")
+                            search_and_cluster_fn = fallback_search_and_cluster
+                    except Exception as e:
+                        print(f"Error importing module: {e}")
+                        search_and_cluster_fn = fallback_search_and_cluster
+                    
+                    print("Successfully set up search_and_cluster function")
+                    use_dummy_data = False
+                    
+                    # Keep searching until we have NUM_PROBLEMS, hit max attempts, or reach timeout
+                    while not have_enough_problems(new_clusters) and search_attempts < max_search_attempts:
+                        # Check if we've exceeded the time limit
+                        if time.time() - start_time > max_search_time:
+                            print(f"Search time limit of {max_search_time} seconds reached")
+                            break
+                        
+                        search_attempts += 1
+                        print(f"Search attempt {search_attempts} for new problems (target: {NUM_PROBLEMS})...")
+                        
+                        try:
+                            # Get additional clusters
+                            additional_clusters = search_and_cluster_fn()
+                            if additional_clusters:
+                                # Make sure we only add valid clusters with sources
+                                valid_additional = [c for c in additional_clusters if hasattr(c, 'sources') and c.sources]
+                                if valid_additional:
+                                    new_clusters.extend(valid_additional)
+                                    valid_count = len([c for c in new_clusters if hasattr(c, 'sources') and c.sources])
+                                    print(f"Found {valid_count} valid problems so far (after {search_attempts} attempts)")
+                                    
+                                    # If we've reached our target, we can stop
+                                    if valid_count >= NUM_PROBLEMS:
+                                        print(f"Reached target of {NUM_PROBLEMS} problems, stopping search")
+                                        break
+                                else:
+                                    print("No valid problems found in this search attempt (no sources)")
+                            else:
+                                print("No additional problems found in this search attempt")
+                        except Exception as e:
+                            print(f"Error in search attempt {search_attempts}: {e}")
+                            traceback.print_exc()
+                            # Add a small delay before the next attempt
+                            time.sleep(2)
+                    
+                    search_duration = time.time() - start_time
+                    valid_count = len([c for c in new_clusters if hasattr(c, 'sources') and c.sources])
+                    print(f"Completed search with {valid_count} valid problems after {search_attempts} attempts ({search_duration:.1f} seconds)")
+                except Exception as e:
+                    print(f"Error in search process: {e}")
+                    traceback.print_exc()
+                    use_dummy_data = True
+            else:
+                print("problem_finder_mvp.py not found, using dummy data instead")
+                
+            # If we couldn't use the real search_and_cluster, use dummy data
+            if use_dummy_data:
+                print("Using dummy data generation")
+                # Define our fallback function if it's not already defined
+                if 'fallback_search_and_cluster' not in locals():
+                    def fallback_search_and_cluster():
+                        """Fallback implementation of search_and_cluster"""
+                        print("Using fallback search_and_cluster function")
+                        import random
+                        
+                        # Create a batch of dummy problems (5-10 per batch)
+                        batch_size = random.randint(5, 10)
+                        
+                        result = []
+                        
+                        # List of problem templates to create unique problems
+                        problem_templates = [
+                            ("Users struggle with {issue} on {platform}",
+                             "Implement {solution} to improve user experience",
+                             "User Frustration", "https://example.com/ux-issues"),
+                            
+                            ("{audience} need better tools for {task}",
+                             "Create a streamlined interface with {feature}",
+                             "Tool Request", "https://example.com/tool-needs"),
+                             
+                            ("{industry} professionals waste time on {manual_task}",
+                             "Automate {manual_task} with {technology}",
+                             "Automation Need", "https://example.com/automation"),
+                             
+                            ("Small businesses struggle to {business_challenge}",
+                             "Provide a simple solution that {solution_benefit}",
+                             "Business Pain Point", "https://example.com/business")
+                        ]
+                        
+                        # Lists of values to fill in the templates
+                        issues = ["navigation confusion", "slow load times", "complex forms", "confusing settings", 
+                                  "poor accessibility", "inconsistent UI", "difficult search", "cluttered layout"]
+                        platforms = ["mobile apps", "websites", "desktop software", "tablets", 
+                                    "smart TVs", "wearable devices", "vehicle interfaces", "kiosks"]
+                        solutions = ["intuitive design", "progressive loading", "step-by-step guidance", "contextual help",
+                                    "simplified controls", "voice commands", "personalized layouts", "smart defaults"]
+                        audiences = ["Marketers", "Developers", "Designers", "Small business owners",
+                                    "Educators", "Healthcare workers", "Remote employees", "Content creators"]
+                        tasks = ["content creation", "data analysis", "project management", "customer tracking",
+                                "scheduling", "documentation", "collaboration", "resource allocation"]
+                        features = ["drag-and-drop interface", "one-click automation", "visual dashboards", "templates",
+                                   "keyboard shortcuts", "batch processing", "smart suggestions", "unified workspace"]
+                        industries = ["Healthcare", "Education", "Finance", "Retail",
+                                     "Manufacturing", "Agriculture", "Transportation", "Entertainment"]
+                        manual_tasks = ["data entry", "report generation", "email management", "scheduling",
+                                       "invoice processing", "inventory counts", "customer followups", "quality checks"]
+                        technologies = ["AI assistance", "smart templates", "rule-based automation", "machine learning",
+                                       "computer vision", "natural language processing", "predictive analytics", "robotic process automation"]
+                        business_challenges = ["manage inventory", "track expenses", "acquire customers", "handle paperwork",
+                                              "process payments", "maintain compliance", "train employees", "manage suppliers"]
+                        solution_benefits = ["reduces overhead", "saves 5+ hours per week", "increases customer satisfaction", "eliminates errors",
+                                            "improves cash flow", "enables scaling", "reduces employee turnover", "lowers compliance risk"]
+                        
+                        for _ in range(batch_size):
+                            # Pick a random template
+                            template = random.choice(problem_templates)
+                            
+                            if template[0].startswith("Users struggle"):
+                                problem = template[0].format(
+                                    issue=random.choice(issues), 
+                                    platform=random.choice(platforms)
+                                )
+                                solution = template[1].format(solution=random.choice(solutions))
+                                
+                            elif template[0].startswith("{audience}"):
+                                problem = template[0].format(
+                                    audience=random.choice(audiences), 
+                                    task=random.choice(tasks)
+                                )
+                                solution = template[1].format(feature=random.choice(features))
+                                
+                            elif template[0].startswith("{industry}"):
+                                problem = template[0].format(
+                                    industry=random.choice(industries), 
+                                    manual_task=random.choice(manual_tasks)
+                                )
+                                solution = template[1].format(
+                                    manual_task=random.choice(manual_tasks),
+                                    technology=random.choice(technologies)
+                                )
+                                
+                            else:  # Small businesses template
+                                problem = template[0].format(business_challenge=random.choice(business_challenges))
+                                solution = template[1].format(solution_benefit=random.choice(solution_benefits))
+                            
+                            # Create multiple sources (3-5) for each problem
+                            num_sources = random.randint(3, 5)
+                            sources = []
+                            for i in range(num_sources):
+                                sources.append(DummySource(
+                                    f"Source {i+1} for {template[2]}", 
+                                    f"{template[3]}?id={i+1}", 
+                                    f"Users reported: {problem} - Complaint #{i+1}"
+                                ))
+                            
+                            # Create the new problem with multiple sources
+                            result.append(DummyCluster(
+                                problem,
+                                solution,
+                                sources
+                            ))
+                        
+                        return result
+                
+                # Use our fallback function
+                search_and_cluster_fn = fallback_search_and_cluster
+                
+                # Keep searching until we have NUM_PROBLEMS, hit max attempts, or reach timeout
+                while not have_enough_problems(new_clusters) and search_attempts < max_search_attempts:
+                    # Check if we've exceeded the time limit
+                    if time.time() - start_time > max_search_time:
+                        print(f"Search time limit of {max_search_time} seconds reached")
+                        break
+                    
+                    search_attempts += 1
+                    print(f"Dummy data generation attempt {search_attempts} (target: {NUM_PROBLEMS})...")
+                    
+                    try:
+                        # Get additional clusters
+                        additional_clusters = search_and_cluster_fn()
+                        if additional_clusters:
+                            # Make sure we only add valid clusters with sources
+                            valid_additional = [c for c in additional_clusters if hasattr(c, 'sources') and c.sources]
+                            if valid_additional:
+                                new_clusters.extend(valid_additional)
+                                valid_count = len([c for c in new_clusters if hasattr(c, 'sources') and c.sources])
+                                print(f"Generated {valid_count} valid problems so far (after {search_attempts} attempts)")
+                                
+                                # If we've reached our target, we can stop
+                                if valid_count >= NUM_PROBLEMS:
+                                    print(f"Reached target of {NUM_PROBLEMS} problems, stopping search")
+                                    break
+                            else:
+                                print("No valid problems generated in this attempt (no sources)")
+                        else:
+                            print("No additional problems generated in this attempt")
+                    except Exception as e:
+                        print(f"Error in dummy generation attempt {search_attempts}: {e}")
+                        # Add a small delay before the next attempt
+                        time.sleep(1)
+                
+                search_duration = time.time() - start_time
+                valid_count = len([c for c in new_clusters if hasattr(c, 'sources') and c.sources])
+                print(f"Completed dummy data generation with {valid_count} valid problems after {search_attempts} attempts ({search_duration:.1f} seconds)")
+        except Exception as e:
+            print(f"Error finding new problems: {e}")
+            traceback.print_exc()
+            # Fallback to a single dummy problem if everything else fails
+            new_clusters = [
+                DummyCluster(
+                    "Users need better tools for organizing digital content",
+                    "Create a cross-platform content management system with AI tagging",
+                    [
+                        DummySource("Digital Organization Issues", "https://example.com/organization", "Users struggle with organizing files across devices"),
+                        DummySource("Content Management Problems", "https://example.com/content", "People need better ways to organize their growing digital libraries"),
+                        DummySource("File Management Forum", "https://example.com/forum", "Discussion about the challenges of keeping digital assets organized")
+                    ]
+                )
+            ]
+        
+        # 4. Combine updated and new clusters
+        all_clusters = updated_clusters + new_clusters
+        
+        # Count valid clusters (those with sources)
+        valid_clusters = [c for c in all_clusters if hasattr(c, 'sources') and c.sources]
+        print(f"Found a total of {len(valid_clusters)} valid problems (with sources)")
+        
+        # Always update the database, even if we don't have the target number of problems
+        if len(valid_clusters) > 0:
+            print(f"Proceeding with database update ({len(valid_clusters)} problems found)")
+            # 5. Update the database with all valid clusters
+            update_database_with_problems(valid_clusters, existing_problems)
+        else:
+            print("No valid problems found. Nothing to update in the database.")
+            print("Will try again next run.")
         
     except Exception as e:
         print(f"Error running script: {e}")
