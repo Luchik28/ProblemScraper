@@ -25,37 +25,49 @@ export async function getProblems(): Promise<Problem[]> {
       return mockProblems;
     }
     
-    // Otherwise, fetch from Supabase
-    const { data, error } = await supabase
+    // First, fetch the problems
+    const { data: problemsData, error: problemsError } = await supabase
       .from('problems')
-      .select(`
-        id, 
-        statement, 
-        solution, 
-        has_negative_reviews, 
-        review_url, 
-        created_at, 
-        updated_at,
-        sources (
-          id, 
-          title, 
-          url, 
-          snippet
-        )
-      `)
+      .select('*')
       .order('updated_at', { ascending: false });
     
-    if (error) {
-      console.error('Error fetching from Supabase:', error);
+    if (problemsError || !problemsData || problemsData.length === 0) {
+      console.error('Error fetching problems from Supabase or no problems found:', problemsError);
       return mockProblems;
     }
     
-    if (!data || data.length === 0) {
-      console.warn('No data found in Supabase, using mock data');
-      return mockProblems;
-    }
+    // Then, for each problem, fetch its sources using the junction table
+    const problems = await Promise.all(problemsData.map(async (problem) => {
+      const { data: sourceLinks, error: linksError } = await supabase
+        .from('problem_sources')
+        .select('source_id')
+        .eq('problem_id', problem.id);
+      
+      if (linksError || !sourceLinks || sourceLinks.length === 0) {
+        // If no sources found or error, return problem with empty sources array
+        return { ...problem, sources: [] };
+      }
+      
+      // Get all source IDs for this problem
+      const sourceIds = sourceLinks.map(link => link.source_id);
+      
+      // Fetch the actual sources
+      const { data: sources, error: sourcesError } = await supabase
+        .from('sources')
+        .select('*')
+        .in('id', sourceIds);
+      
+      if (sourcesError || !sources) {
+        // If error fetching sources, return problem with empty sources array
+        return { ...problem, sources: [] };
+      }
+      
+      // Return the problem with its sources
+      return { ...problem, sources };
+    }));
     
-    return data as Problem[];
+    console.log('Fetched problems from Supabase:', problems);
+    return problems as Problem[];
   } catch (error) {
     console.error('Error in getProblems:', error);
     return mockProblems;

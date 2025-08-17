@@ -28,13 +28,25 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Iterable, Optional, Set
 from concurrent.futures import ThreadPoolExecutor
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Try to load from script directory first, then from project root
+    if os.path.exists(os.path.join(os.path.dirname(__file__), '.env')):
+        load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+    else:
+        load_dotenv()
+    print("Loaded environment variables from .env file")
+except Exception as e:
+    print(f"Warning: Could not load .env file: {e}")
+
 # Suppress HF noise
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from transformers import pipeline, logging as hf_logging
 hf_logging.set_verbosity_error()
 
 from sentence_transformers import SentenceTransformer, util
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from tqdm import tqdm
 from supabase import create_client, Client
 
@@ -167,15 +179,20 @@ def upsert_source(supabase: Client, source: dict) -> str:
 
 def link_problem_source(supabase: Client, problem_id: str, source_id: str) -> None:
     """Link a problem to a source in the junction table."""
-    # Check if link already exists
-    result = supabase.table("problem_sources").select("*").eq("problem_id", problem_id).eq("source_id", source_id).execute()
-    
-    if not result.data or len(result.data) == 0:
-        # Create new link
-        supabase.table("problem_sources").insert({
-            "problem_id": problem_id,
-            "source_id": source_id
-        }).execute()
+    try:
+        # Check if link already exists
+        result = supabase.table("problem_sources").select("*").eq("problem_id", problem_id).eq("source_id", source_id).execute()
+        
+        if not result.data or len(result.data) == 0:
+            # Create new link
+            supabase.table("problem_sources").insert({
+                "problem_id": problem_id,
+                "source_id": source_id
+            }).execute()
+            print(f"Linked problem {problem_id} to source {source_id}")
+    except Exception as e:
+        print(f"Error linking problem to source: {e}")
+        traceback.print_exc()
 
 # [Include all the original problem finder code here]
 # ... 

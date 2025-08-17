@@ -1,6 +1,6 @@
 supabase
 python-dotenv
 tqdm
-ddgs
+duckduckgo-search
 transformers
 sentence-transformers
