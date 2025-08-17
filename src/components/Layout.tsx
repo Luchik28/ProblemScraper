@@ -1,5 +1,5 @@
 'use client';
-import { Analytics } from '@vercel/analytics/react';
+import { Analytics } from '@vercel/analytics/next';
 
 import Header from './Header';
 import Footer from './Footer';
