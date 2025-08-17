@@ -9,6 +9,35 @@ import ProblemCardGrid from '@/components/ProblemCardGrid';
 type SortOption = 'sources' | 'updated' | 'none';
 type SortDirection = 'asc' | 'desc';
 
+// Function to format the time since last update
+const getLastUpdateText = (problems: Problem[]): string => {
+  if (!problems || problems.length === 0) return 'N/A';
+  
+  // Find the most recently updated problem
+  const mostRecentDate = problems.reduce((latest, problem) => {
+    const problemDate = new Date(problem.updated_at).getTime();
+    return problemDate > latest ? problemDate : latest;
+  }, 0);
+  
+  if (!mostRecentDate) return 'N/A';
+  
+  const now = new Date().getTime();
+  const diffMs = now - mostRecentDate;
+  
+  // Convert to appropriate time unit
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (diffMinutes < 60) {
+    return `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''} ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+  } else {
+    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+  }
+};
+
 export default function Home() {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -102,6 +131,19 @@ export default function Home() {
                 Discover real problems that need solutions. Each problem represents a potential product opportunity.
               </p>
             </div>
+            
+            {/* Stats bar showing problem count and last update */}
+            {!loading && problems.length > 0 && (
+              <div className="bg-gray-100 border border-gray-200 rounded-md py-2 px-3">
+                <p className="text-xs font-mono text-gray-600 flex flex-wrap gap-x-6">
+                  <span><strong>Total Problems:</strong> {problems.length}</span>
+                  <span><strong>Unsolved Problems:</strong> {problems.filter(p => !p.solution).length}</span>
+                  <span>
+                    <strong>Last Updated:</strong> {getLastUpdateText(problems)}
+                  </span>
+                </p>
+              </div>
+            )}
             
             {loading ? (
               <div className="flex justify-center items-center py-12">
