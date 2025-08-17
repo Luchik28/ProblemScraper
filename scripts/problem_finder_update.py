@@ -47,7 +47,7 @@ from transformers import pipeline, logging as hf_logging
 hf_logging.set_verbosity_error()
 
 from sentence_transformers import SentenceTransformer, util
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from tqdm import tqdm
 from supabase import create_client, Client
 
