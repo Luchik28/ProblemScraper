@@ -9,7 +9,7 @@ Problem Aggregator — DuckDuckGo + Local AI (no OpenAI, no Reddit API)
 • Outputs a list of problems with an indented list of sources under each
 
 Install deps:
-  pip install duckduckgo_search transformers sentence-transformers torch tqdm
+  pip install ddgs transformers sentence-transformers torch tqdm
 
 Run:
   python problem_aggregator_ddg.py
@@ -17,7 +17,6 @@ Run:
 Tune knobs in CONFIG below.
 """
 
-from __future__ import annotations
 import os
 import re
 import sys
@@ -26,8 +25,9 @@ import math
 import logging
 import requests
 import traceback
+import gc
 from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Iterable, Optional, Set
+from typing import List, Dict, Tuple, Iterable, Optional, Set, Any
 from concurrent.futures import ThreadPoolExecutor
 
 # Suppress HF noise
@@ -119,9 +119,10 @@ class Source:
 @dataclass
 class Cluster:
     problem: str
-    embedding: any
+    embedding: Any
     sources: List[Source] = field(default_factory=list)
     solution: str = ""  # Field to store a potential solution if found
+    solution_url: str = ""  # URL to the solution if available
     has_negative_reviews: bool = False  # Whether the solution has negative reviews
     review_url: str = ""  # URL with negative reviews if any
 
@@ -174,10 +175,11 @@ def is_already_resolved(text: str) -> bool:
     return any(re.search(p, t) for p in resolved_patterns)
 
 
-def extract_solution(text: str, problem_statement: str = "") -> str:
+def extract_solution(text: str, problem_statement: str = "", source_url: str = "") -> Tuple[str, str]:
     """
     Extract a potential solution from text if one exists.
     If problem_statement is provided, verify the solution is relevant to the problem.
+    Returns a tuple of (solution_text, solution_url)
     """
     t = text.lower()
     
@@ -201,8 +203,49 @@ def extract_solution(text: str, problem_statement: str = "") -> str:
                 # If we have a problem statement, verify the solution is relevant
                 if problem_statement and not is_solution_relevant_to_problem(solution, problem_statement):
                     continue  # Skip this solution if it's not relevant
-                return solution
+                
+                # Extract URLs from the solution text if any
+                solution_url_from_text = extract_url_from_text(solution)
+                # Use the source URL if we don't have a URL in the solution text
+                final_url = solution_url_from_text or source_url
+                
+                return solution, final_url
     
+    # Try to extract URLs from the entire text if we couldn't find a solution pattern
+    if len(text) > 0:
+        url_from_text = extract_url_from_text(text)
+        if url_from_text:
+            return "", url_from_text
+    
+    return "", source_url
+
+
+def extract_url_from_text(text: str) -> str:
+    """Extract URLs from text and return the first one found."""
+    if not text:
+        return ""
+    
+    # Regular expression for finding URLs
+    url_pattern = r'https?://[^\s\)\]\'"]+(?:\.[^\s\)\]\'",]+)+[^\s\)\]\'".,]'
+    urls = re.findall(url_pattern, text)
+    
+    if urls:
+        # Clean the URL: remove tracking parameters, fragments, etc.
+        url = urls[0]
+        
+        # Simple URL cleaning
+        # Remove fragments
+        url = re.sub(r'#[^?]*$', '', url)
+        
+        # Remove common tracking parameters
+        url = re.sub(r'[?&]utm_[^&]*', '', url)
+        url = re.sub(r'[?&]fbclid=[^&]*', '', url)
+        url = re.sub(r'[?&]ref=[^&]*', '', url)
+        
+        # Fix trailing characters
+        url = re.sub(r'[.,;:)]$', '', url)
+        
+        return url
     return ""
 
 
@@ -416,11 +459,11 @@ def extract_concepts(text: str) -> Set[str]:
     return concepts
 
 
-def search_for_solution(problem_statement: str) -> str:
+def search_for_solution(problem_statement: str) -> Tuple[str, str]:
     """
     Actively search for a solution to a given problem statement.
-    Returns an empty string if no solution is found, or a string with solution details.
-    If negative reviews are found, includes that information.
+    Returns a tuple of (solution_text, solution_url).
+    If negative reviews are found, includes that information in the solution text.
     """
     try:
         # Formulate a search query specifically looking for solutions
@@ -432,7 +475,7 @@ def search_for_solution(problem_statement: str) -> str:
         results = ddg_search(solution_query, 8)  # Increase to more results
         
         if not results:
-            return ""
+            return "", ""
             
         # Fetch content for these results
         enhanced_results = fetch_contents_for_sources(results)
@@ -474,24 +517,25 @@ def search_for_solution(problem_statement: str) -> str:
             
             if is_solution_page:
                 # Extract the potential solution
-                solution = extract_solution(full_content, problem_statement)
-                if solution:
+                solution_text, solution_url = extract_solution(full_content, problem_statement, src.url)
+                if solution_text:
                     # Double-check the solution is relevant to the problem
-                    if is_solution_relevant_to_problem(solution, problem_statement):
+                    if is_solution_relevant_to_problem(solution_text, problem_statement):
                         # Check if the solution has negative reviews
-                        has_negative_reviews, review_url = check_solution_sentiment(solution, src.url, problem_statement)
+                        has_negative_reviews, review_url = check_solution_sentiment(solution_text, solution_url or src.url, problem_statement)
                         
+                        solution_text_with_source = solution_text
                         if has_negative_reviews:
-                            return f"{solution} (Source: {src.url}) [WARNING: Has negative reviews: {review_url}]"
-                        else:
-                            return f"{solution} (Source: {src.url})"
+                            solution_text_with_source += " [WARNING: Has negative reviews]"
+                        
+                        return solution_text_with_source, solution_url or src.url
                 else:
                     # Before returning just the URL, check if the title suggests it's actually a solution
                     solution_title_indicators = ["best", "top", "guide", "how to", "solution", "tool", "app", "software"]
                     if any(indicator in src.title.lower() for indicator in solution_title_indicators):
                         # Only return URLs that seem to be actual solution listings, not just mentions
                         if any(term in src.title.lower() for term in ["best", "top", "recommended", "tools", "apps", "software", "platforms", "solutions"]):
-                            return f"Potential solutions listed at: {src.url}"
+                            return f"Potential solutions listed at: {src.title}", src.url
         
         # If we didn't find a solution with the first query, try a more direct query
         direct_query = f"best tool app software for {core_problem} alternatives comparison"
@@ -508,27 +552,27 @@ def search_for_solution(problem_statement: str) -> str:
                 # Try to extract recommendations from these results
                 if "best" in src.title.lower() or "top" in src.title.lower() or "recommended" in src.title.lower():
                     # Extract the solution if possible
-                    solution = extract_solution(src.snippet, problem_statement)
-                    if solution and is_solution_relevant_to_problem(solution, problem_statement):
+                    solution_text, solution_url = extract_solution(src.snippet, problem_statement, src.url)
+                    if solution_text and is_solution_relevant_to_problem(solution_text, problem_statement):
                         # Check for negative reviews
-                        has_negative_reviews, review_url = check_solution_sentiment(solution, src.url, problem_statement)
+                        has_negative_reviews, review_url = check_solution_sentiment(solution_text, solution_url or src.url, problem_statement)
                         
+                        solution_text_with_source = solution_text
                         if has_negative_reviews:
-                            return f"{solution} (Source: {src.url}) [WARNING: Has negative reviews: {review_url}]"
-                        else:
-                            return f"{solution} (Source: {src.url})"
+                            solution_text_with_source += " [WARNING: Has negative reviews]"
+                            
+                        return solution_text_with_source, solution_url or src.url
                     else:
                         # Check if the title clearly indicates this is a solution list/recommendation
                         solution_title_indicators = ["best", "top", "recommended", "tools", "apps", "software", "alternatives", "comparison"]
-                        if any(indicator in src.title.lower() for indicator in solution_title_indicators) and \
-                           any(term in src.title.lower() for term in core_problem.split()):
-                            return f"Potential solutions listed at: {src.url}"
+                        if any(indicator in src.title.lower() for indicator in solution_title_indicators):
+                            return f"List of solutions: {src.title}", src.url
         
-        return ""
+        return "", ""
     except Exception as e:
         if DEBUG:
             print(f"Error searching for solution: {e}")
-        return ""
+        return "", ""
 
 
 def is_discussion_or_opinion(text: str) -> bool:
@@ -1213,11 +1257,12 @@ def search_and_cluster() -> List[Cluster]:
                     
                     # Check if this source contains a solution
                     if not matched.solution:  # Only check if we don't already have a solution
-                        solution = extract_solution(f"{src.title} {full_content}")
-                        if solution:
-                            matched.solution = solution
+                        solution_text, solution_url = extract_solution(f"{src.title} {full_content}", "", src.url)
+                        if solution_text:
+                            matched.solution = solution_text
+                            matched.solution_url = solution_url
                             # Check for negative reviews
-                            matched.has_negative_reviews, matched.review_url = check_solution_sentiment(solution, src.url, matched.problem)
+                            matched.has_negative_reviews, matched.review_url = check_solution_sentiment(solution_text, solution_url or src.url, matched.problem)
                             
                     continue
 
@@ -1228,11 +1273,11 @@ def search_and_cluster() -> List[Cluster]:
                     continue
                     
                 # New cluster
-                solution = extract_solution(f"{src.title} {full_content}")
-                new_cluster = Cluster(problem=problem, embedding=emb, sources=[src], solution=solution)
-                if solution:
+                solution_text, solution_url = extract_solution(f"{src.title} {full_content}", "", src.url)
+                new_cluster = Cluster(problem=problem, embedding=emb, sources=[src], solution=solution_text, solution_url=solution_url)
+                if solution_text:
                     # Check for negative reviews
-                    new_cluster.has_negative_reviews, new_cluster.review_url = check_solution_sentiment(solution, src.url, new_cluster.problem)
+                    new_cluster.has_negative_reviews, new_cluster.review_url = check_solution_sentiment(solution_text, solution_url or src.url, new_cluster.problem)
                 clusters.append(new_cluster)
 
                 # Expand search with the generalized problem (to gather more sources)
@@ -1275,11 +1320,12 @@ def search_and_cluster() -> List[Cluster]:
             # Check if any of these new sources contain solutions
             if not cl.solution:  # Only if we don't already have a solution
                 for src in enhanced_extra:
-                    solution = extract_solution(f"{src.title} {src.snippet}")
-                    if solution:
-                        cl.solution = solution
+                    solution_text, solution_url = extract_solution(f"{src.title} {src.snippet}", "", src.url)
+                    if solution_text:
+                        cl.solution = solution_text
+                        cl.solution_url = solution_url
                         # Check for negative reviews
-                        cl.has_negative_reviews, cl.review_url = check_solution_sentiment(solution, src.url, cl.problem)
+                        cl.has_negative_reviews, cl.review_url = check_solution_sentiment(solution_text, solution_url or src.url, cl.problem)
                         break
 
     # If we don't have enough clusters, try to create more from unmatched sources
@@ -1302,11 +1348,11 @@ def search_and_cluster() -> List[Cluster]:
             if problem.lower().startswith("need a way to need"):
                 continue
             
-            solution = extract_solution(f"{src.title} {src.snippet}")    
-            new_cluster = Cluster(problem=problem, embedding=emb, sources=[src], solution=solution)
-            if solution:
+            solution_text, solution_url = extract_solution(f"{src.title} {src.snippet}", "", src.url)    
+            new_cluster = Cluster(problem=problem, embedding=emb, sources=[src], solution=solution_text, solution_url=solution_url)
+            if solution_text:
                 # Check for negative reviews
-                new_cluster.has_negative_reviews, new_cluster.review_url = check_solution_sentiment(solution, src.url, new_cluster.problem)
+                new_cluster.has_negative_reviews, new_cluster.review_url = check_solution_sentiment(solution_text, solution_url or src.url, new_cluster.problem)
             clusters.append(new_cluster)
             
             # Try to find more sources for this new cluster
@@ -1325,10 +1371,14 @@ def search_and_cluster() -> List[Cluster]:
         
         # If we don't have a solution yet, actively search for one
         if not cl.solution:
-            solution_text = search_for_solution(cl.problem)
+            solution_text, solution_url = search_for_solution(cl.problem)
             if solution_text:
                 cl.solution = solution_text
+                cl.solution_url = solution_url
+                
                 # Parse negative review info if present
+                if "[WARNING: Has negative reviews]" in solution_text:
+                    cl.has_negative_reviews = True
                 if "[WARNING: Has negative reviews:" in solution_text:
                     cl.has_negative_reviews = True
                     # Extract the review URL
@@ -1526,6 +1576,8 @@ def save_markdown(clusters: List[Cluster], path: str = "problems.md"):
         
         if cl.solution:
             solution_text = f"**Solution:** {cl.solution}"
+            if cl.solution_url:
+                solution_text += f"\n\n**Solution Link:** [{cl.solution_url}]({cl.solution_url})"
             if cl.has_negative_reviews and cl.review_url:
                 solution_text += f"\n\n**Warning:** This solution has [negative reviews]({cl.review_url})."
             lines.append(f"{solution_text}\n")

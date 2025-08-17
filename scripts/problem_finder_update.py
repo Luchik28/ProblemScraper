@@ -27,6 +27,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Iterable, Optional, Set
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse, urlunparse
 
 # Load environment variables from .env file
 try:
@@ -292,10 +293,13 @@ def update_database_with_problems(clusters, existing_problems=None):
                 # Ensure the URL is valid (no example.com)
                 if "example.com" in source.url or not source.url or not source.url.startswith(('http://', 'https://')):
                     continue
+                
+                # Clean the URL
+                cleaned_url = clean_url(source.url)
                     
                 source_data = {
                     "title": source.title,
-                    "url": source.url,
+                    "url": cleaned_url,
                     "snippet": source.snippet,
                     "updated_at": current_time
                 }
@@ -327,8 +331,40 @@ def extract_urls_from_text(text: str) -> str:
     urls = re.findall(url_pattern, text)
     
     if urls:
-        return urls[0]  # Return the first URL found
+        return clean_url(urls[0])  # Return the first URL found, cleaned
     return ""
+
+def clean_url(url: str) -> str:
+    """Clean and validate a URL."""
+    if not url:
+        return ""
+    
+    # Make sure URL starts with http:// or https://
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    # Parse URL and rebuild it to normalize components
+    try:
+        parsed = urlparse(url)
+        
+        # Remove any unwanted query params or fragments
+        query = parsed.query
+        
+        # Rebuild the URL
+        clean_url = urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            query,
+            ''  # Remove fragment (anchor) as it's not needed for the source
+        ))
+        
+        return clean_url
+    except Exception as e:
+        if DEBUG:
+            print(f"Error cleaning URL {url}: {e}")
+        return url
 
 # -----------------------------
 # MAIN
