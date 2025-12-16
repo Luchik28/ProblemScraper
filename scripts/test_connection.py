@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Problem Finder - Test Script
----------------------------
+----------------------------
 This script verifies that your environment is set up correctly and can connect
 to Supabase. It's a quick check before running the full problem finder.
 """
